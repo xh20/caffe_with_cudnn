@@ -1,43 +1,40 @@
-FROM nvidia/cuda:8.0-cudnn6-devel-ubuntu16.04
-LABEL maintainer caffe-maint@googlegroups.com
+# ARG CUDA_VERSION=10.2
+# ARG CUDNN_VERSION=7.6.5
+# ARG PYTHON_VERSION=3.6.9
+# ARG OPENCV_VERSION=3.4.0
+# ARG GCC_VERSION=7.4.0
+# 18.04.1-Ubuntu
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        cmake \
-        git \
-        wget \
-        libatlas-base-dev \
-        libboost-all-dev \
-        libgflags-dev \
-        libgoogle-glog-dev \
-        libhdf5-serial-dev \
-        libleveldb-dev \
-        liblmdb-dev \
-        libopencv-dev \
-        libprotobuf-dev \
-        libsnappy-dev \
-        protobuf-compiler \
-        python-dev \
-        python-numpy \
-        python-pip \
-        python-setuptools \
-        python-scipy && \
-    rm -rf /var/lib/apt/lists/*
+FROM nvcr.io/nvidia/caffe:20.03-py3
 
-ENV CAFFE_ROOT=/opt/caffe
+LABEL maintainer="https://github.com/ZiliPeng"
+
+# Needed for string substitution
+SHELL ["/bin/bash", "-c"]
+
+# Upgrade CMake
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.14.7/cmake-3.14.7-Linux-x86_64.tar.gz && \
+    tar -xvf cmake-3.14.7-Linux-x86_64.tar.gz && \
+    mv cmake-3.14.7-Linux-x86_64 /opt && \
+    echo "export PATH=/opt/cmake-3.14.7-Linux-x86_64/bin:$PATH" >> /etc/profile && \
+    . /etc/profile && \
+    rm cmake-3.14.7-Linux-x86_64.tar.gz
+
+# Install Caffe
+ENV PATH=/opt/cmake-3.14.7-Linux-x86_64/bin:$PATH
+ENV CAFFE_ROOT=/opt/cmu_caffe
 WORKDIR $CAFFE_ROOT
 
-# FIXME: use ARG instead of ENV once DockerHub supports this
-# https://github.com/docker/hub-feedback/issues/460
-ENV CLONE_TAG=1.0
-
-RUN git clone -b ${CLONE_TAG} --depth 1 https://github.com/BVLC/caffe.git . && \
-    pip install --upgrade pip && \
-    cd python && for req in $(cat requirements.txt) pydot; do pip install $req; done && cd .. && \
-    git clone https://github.com/NVIDIA/nccl.git && cd nccl && make -j install && cd .. && rm -rf nccl && \
+RUN  cd /opt && \
+    git clone https://github.com/CMU-Perceptual-Computing-Lab/caffe.git && \
+    cd $CAFFE_ROOT && \
+    sed -i 's/set(python_version "2"/set(python_version "3"/g' CMakeLists.txt && \
+    # sed -i 's/set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wall")/set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wall -std=c++11")/g' CMakeLists.txt && \
+    # sed -i 's/cudnn.h CUDNN_VERSION_FILE_CONTENTS/cudnn_version.h CUDNN_VERSION_FILE_CONTENTS/g' cmake/Cuda.cmake && \
     mkdir build && cd build && \
-    cmake -DUSE_CUDNN=1 -DUSE_NCCL=1 .. && \
-    make -j"$(nproc)"
+    cmake -DUSE_CUDNN=1 -DUSE_NCCL=ON -DUSE_OPENMP=1 .. && \
+    make -j"$(nproc)"  && \
+    make pycaffe -j"$(nproc)"
 
 ENV PYCAFFE_ROOT $CAFFE_ROOT/python
 ENV PYTHONPATH $PYCAFFE_ROOT:$PYTHONPATH
