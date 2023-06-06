@@ -27,7 +27,6 @@ void CuDNNConvolutionLayer<Dtype>::LayerSetUp(
   workspaceSizeInBytes = 0;
   workspaceData = NULL;
   workspace = new void*[this->group_ * CUDNN_STREAMS_PER_GROUP];
-  workspace_size_ = 0;
 
   for (int g = 0; g < this->group_ * CUDNN_STREAMS_PER_GROUP; g++) {
     CUDA_CHECK(cudaStreamCreate(&stream_[g]));
@@ -140,28 +139,24 @@ void CuDNNConvolutionLayer<Dtype>::Reshape(
     int64_t pad[]      = {pad_h, pad_w};
     int64_t dilation[] = {1, 1};
     int64_t stride[]   = {stride_h, stride_w};
-    // Note: This is a hack. Running openpose will call this function twice.
-    // Without it, the cache will have the wrong plan, i.e. wrong input config.
+    // Note: This is a hack. Running openpose will call this function a few times.
     // The first run has 16x16 input size, default value for caffe net init???
-    if (!second_run_) { second_run_ = true; continue; }
-    // Create an Operation Graph.
-    // Note: We create a graph of conv + scale + bias ops.
-    // This is a supported graph pattern, conv + bias only is not supported.
-    auto opGraph = create_graph_operation(
-      x_dim, w_dim, y_dim, pad, dilation, stride, 
-      CUDNN_DATA_FLOAT, CUDNN_DATA_FLOAT, handle_[0], this->bias_term_
-    );
-    op_graph_ = &opGraph;
-    // Create an execution plan and cache it.
-    // Note: Saving/caching the plan without mutex lock will fail.
-    // The cache function in `cudnn_frontend` uses mutex lock.
-    const cudnn_frontend::ExecutionPlan *cached_plan;
-    if (!plan_cache_->get_plan_from_cache(*(op_graph_), cached_plan))
-    {
-      auto plan = get_execution_plan(*(op_graph_), handle_[0]);
-      plan_cache_->add_plan_to_cache(*(op_graph_), plan);
-      workspace_size_ = plan.getWorkspaceSize();
-      checkCudaErr(cudaMalloc(&(this->workspaceData), workspace_size_)); 
+    if (this->mem_alloc < 3) {
+      // Create an Operation Graph.
+      // Note: We create a graph of conv + scale + bias ops.
+      // The openpose format of NCHW does not support runtime fusion. (Need NHWC)
+      auto op_graph_ = create_graph_operation(
+        x_dim, w_dim, y_dim, pad, dilation, stride, 
+        CUDNN_DATA_FLOAT, CUDNN_DATA_FLOAT, handle_[0], this->bias_term_
+      );
+      auto plan = get_execution_plan(std::move(op_graph_), handle_[0]);
+      plan_ = new cudnn_frontend::ExecutionPlan(plan);
+      auto workspace_size_ = plan_->getWorkspaceSize();
+      if (this->mem_alloc > 0) {
+        checkCudaErr(cudaFree(this->workspaceData));
+      }
+      checkCudaErr(cudaMalloc(&(this->workspaceData), (size_t)workspace_size_));
+      this->mem_alloc += 1;
     }
   }
 }
@@ -370,7 +365,7 @@ CuDNNConvolutionLayer<Dtype>::~CuDNNConvolutionLayer() {
     cudnnDestroy(handle_[g]);
   }
 
-  if (workspace_size_ > 0) { checkCudaErr(cudaFree(workspaceData)); }
+  checkCudaErr(cudaFree(workspaceData));
   delete [] stream_;
   delete [] handle_;
 #else

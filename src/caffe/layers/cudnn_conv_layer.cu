@@ -47,15 +47,13 @@ void CuDNNConvolutionLayer<Dtype>::Forward_gpu(
                         .build()
                         .get_raw_desc();
       }
-      
-      const cudnn_frontend::ExecutionPlan *cached_plan;
-      plan_cache_->get_plan_from_cache(*(op_graph_), cached_plan);
 
       // Exceute graph API convolution.
       cudnnStatus_t status = cudnnBackendExecute(handle_[0],
-                                                 cached_plan->get_raw_desc(),
+                                                 plan_->get_raw_desc(),
                                                  // cached_plan->get_raw_desc(),
                                                  variant_pack_raw_desc);
+                             
       cudnn_frontend::throw_if([status]()
                                 { return (status != CUDNN_STATUS_SUCCESS); },
                                 "Plan execute error",

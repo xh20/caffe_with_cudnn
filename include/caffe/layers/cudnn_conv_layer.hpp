@@ -39,8 +39,7 @@ class CuDNNConvolutionLayer : public ConvolutionLayer<Dtype> {
   explicit CuDNNConvolutionLayer(const LayerParameter& param)
 #if CUDNN_VERSION_MIN(8, 0, 0) && defined(USE_CUDNN_FRONTEND)
       : ConvolutionLayer<Dtype>(param),
-        handles_setup_(false), 
-        plan_cache_(new cudnn_frontend::ExecutionPlanCache(param.name().c_str())) {}
+        handles_setup_(false) {}
 #else
       : ConvolutionLayer<Dtype>(param), handles_setup_(false) {}
 #endif
@@ -80,9 +79,10 @@ class CuDNNConvolutionLayer : public ConvolutionLayer<Dtype> {
   void **workspace;  // aliases into workspaceData
 
 #if CUDNN_VERSION_MIN(8, 0, 0) && defined(USE_CUDNN_FRONTEND)
-  int64_t workspace_size_;
-  cudnn_frontend::OperationGraph *op_graph_;
-  cudnn_frontend::ExecutionPlanCache *plan_cache_;
+  int mem_alloc = 0;
+  std::string op_tag_;
+  cudnn_frontend::ExecutionPlan *plan_;
+  cudnn_frontend::EngineConfigList ecfgl;
   bool second_run_ = false;
 #endif
 

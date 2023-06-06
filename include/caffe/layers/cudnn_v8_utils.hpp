@@ -81,7 +81,7 @@ namespace caffe
                            bool bias);
 
     cudnn_frontend::ExecutionPlan
-    get_execution_plan(cudnn_frontend::OperationGraph &op_graph,
+    get_execution_plan(cudnn_frontend::OperationGraph &&op_graph,
                        cudnnHandle_t handle);
 
 } // namespace caffe
