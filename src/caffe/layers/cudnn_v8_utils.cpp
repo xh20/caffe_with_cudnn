@@ -318,7 +318,7 @@ namespace caffe
             }
             catch (cudnn_frontend::cudnnException &e)
             {
-                std::cout << "cudnnException " << e.what() << std::endl;
+                // std::cout << "WARNING: cudnnException " << e.what() << std::endl;
                 continue;
             }
         }

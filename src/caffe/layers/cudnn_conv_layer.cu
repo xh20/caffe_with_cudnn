@@ -15,48 +15,64 @@ void CuDNNConvolutionLayer<Dtype>::Forward_gpu(
   for (int i = 0; i < bottom.size(); ++i) {
     Dtype* bottom_data = bottom[i]->mutable_gpu_data();
     Dtype* top_data = top[i]->mutable_gpu_data();
+    cudnnStatus_t status;
 
     // Forward through cuDNN in parallel over groups.
     for (int g = 0; g < this->group_; g++) {
       // Setup variant pack desc. Links device ptrs to workspace.
-      cudnnBackendDescriptor_t variant_pack_raw_desc;
-      if (this->bias_term_) {
-        Dtype* bias_data = this->blobs_[1]->mutable_gpu_data();
-        void* data_ptrs[] = {bottom_data + bottom_offset_ * g,
-                              top_data + top_offset_ * g,
-                              weight + this->weight_offset_ * g,
-                              bias_data + bias_offset_ * g,
-                              bias_data + bias_offset_ * g};
-        int64_t uids[] = {'x', 'y', 'w', 'z', 'b'};
-        variant_pack_raw_desc = cudnn_frontend::VariantPackBuilder()
-                        .setWorkspacePointer(this->workspaceData)
-                        .setDataPointers(5, data_ptrs)
-                        .setUids(5, uids)
-                        .build()
-                        .get_raw_desc();
-      }
-      else {
-        void* data_ptrs[] = {bottom_data + bottom_offset_ * g,
-                              top_data + top_offset_ * g,
-                              weight + this->weight_offset_ * g};
-        int64_t uids[] = {'x', 'y', 'w'};
-        variant_pack_raw_desc = cudnn_frontend::VariantPackBuilder()
-                        .setWorkspacePointer(this->workspaceData)
-                        .setDataPointers(3, data_ptrs)
-                        .setUids(3, uids)
-                        .build()
-                        .get_raw_desc();
+      while (true) {
+          cudnnBackendDescriptor_t variant_pack_raw_desc;
+          if (this->bias_term_) {
+            Dtype* bias_data = this->blobs_[1]->mutable_gpu_data();
+            void* data_ptrs[] = {bottom_data + bottom_offset_ * g,
+                                  top_data + top_offset_ * g,
+                                  weight + this->weight_offset_ * g,
+                                  bias_data + bias_offset_ * g,
+                                  bias_data + bias_offset_ * g};
+            // y = w*x + b doesnt work
+            // y = w*x works
+            // y = w*x + (*alpha) z + (*beta) b ; alpha = 0, beta = 1
+            int64_t uids[] = {'x', 'y', 'w', 'z', 'b'};
+            variant_pack_raw_desc = cudnn_frontend::VariantPackBuilder()
+                            .setWorkspacePointer(this->workspaceData)
+                            .setDataPointers(5, data_ptrs)
+                            .setUids(5, uids)
+                            .build()
+                            .get_raw_desc();
+          }
+          else {
+            void* data_ptrs[] = {bottom_data + bottom_offset_ * g,
+                                  top_data + top_offset_ * g,
+                                  weight + this->weight_offset_ * g};
+            int64_t uids[] = {'x', 'y', 'w'};
+            variant_pack_raw_desc = cudnn_frontend::VariantPackBuilder()
+                            .setWorkspacePointer(this->workspaceData)
+                            .setDataPointers(3, data_ptrs)
+                            .setUids(3, uids)
+                            .build()
+                            .get_raw_desc();
+          }
+
+          // Exceute graph API convolution.
+          status = cudnnBackendExecute(handle_[0],
+                                                     plan_->get_raw_desc(),
+                                                     // cached_plan->get_raw_desc(),
+                                                     variant_pack_raw_desc);
+
+          if (status == CUDNN_STATUS_SUCCESS) { break; }
+
       }
 
-      // Exceute graph API convolution.
-      cudnnStatus_t status = cudnnBackendExecute(handle_[0],
-                                                 plan_->get_raw_desc(),
-                                                 // cached_plan->get_raw_desc(),
-                                                 variant_pack_raw_desc);
-                             
+//      while (status != CUDNN_STATUS_SUCCESS) {
+//          status = cudnnBackendExecute(handle_[0],
+//                                         plan_->get_raw_desc(),
+//                                         // cached_plan->get_raw_desc(),
+//                                         variant_pack_raw_desc);
+//      }
+
       cudnn_frontend::throw_if([status]()
                                 { return (status != CUDNN_STATUS_SUCCESS); },
-                                "Plan execute error",
+                                "Plan Execute Error",
                                 status);
     }
 
